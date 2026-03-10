@@ -1,101 +1,126 @@
-export function analyzeAttestations(epoch, slotBlocks, validatorIndices) {
-  const results = [];
+import axios from "axios";
+import { logInfo, logError } from "../utils/logger.js";
 
-  // convert validators to string for matching
-  const validators = validatorIndices.map((v) => String(v));
+/**
+ * Extract attestations from beacon blocks
+ */
+export function extractAttestations(slotBlocks) {
+  const attestations = [];
 
-  // track participation
-  const participation = {};
-
-  for (const v of validators) {
-    participation[v] = {
-      attested: false,
-      source: false,
-      target: false,
-      head: false,
-      classification: "missed_attestation",
-      balance: 32000000000, // 32 ETH effective balance
-      totalActiveBalance: 1000000000000000, // placeholder
-    };
+  if (!slotBlocks || !Array.isArray(slotBlocks)) {
+    return attestations;
   }
 
-  // iterate through slot blocks
   for (const block of slotBlocks) {
-    if (!block?.data?.message?.body?.attestations) continue;
+    try {
+      const blockAttestations = block?.data?.message?.body?.attestations || [];
 
-    const attestations = block.data.message.body.attestations;
+      for (const attestation of blockAttestations) {
+        const attData = attestation.data;
 
-    for (const attestation of attestations) {
-      const attestingIndices = attestation?.aggregation_bits || [];
-
-      // NOTE:
-      // In a full implementation this must decode
-      // aggregation_bits to actual validator indices.
-
-      for (const validator of validators) {
-        if (attestingIndices.includes(validator)) {
-          participation[validator].attested = true;
-
-          const attData = attestation.data;
-
-          /**
-           * SOURCE CHECK
-           * correct source checkpoint
-           */
-          if (attData.source?.epoch <= epoch) {
-            participation[validator].source = true;
-          }
-
-          /**
-           * TARGET CHECK
-           * correct epoch boundary
-           */
-          if (attData.target?.epoch === epoch) {
-            participation[validator].target = true;
-          }
-
-          /**
-           * HEAD CHECK
-           * vote matches block root
-           */
-          if (attData.beacon_block_root) {
-            participation[validator].head = true;
-          }
-
-          // determine classification
-
-          if (
-            participation[validator].source &&
-            participation[validator].target &&
-            participation[validator].head
-          ) {
-            participation[validator].classification = "correct";
-          } else if (!participation[validator].source) {
-            participation[validator].classification = "wrong_source";
-          } else if (!participation[validator].target) {
-            participation[validator].classification = "wrong_target";
-          } else if (!participation[validator].head) {
-            participation[validator].classification = "wrong_head";
-          }
-        }
+        attestations.push({
+          slot: attData.slot,
+          beacon_block_root: attData.beacon_block_root || null,
+          source_epoch: attData.source?.epoch,
+          target_epoch: attData.target?.epoch,
+          aggregation_bits: attestation.aggregation_bits || "",
+        });
       }
+    } catch (error) {
+      // Skip malformed blocks
+      continue;
     }
   }
 
-  // convert participation map to results
+  logInfo(`Extracted ${attestations.length} attestations from blocks`);
+  return attestations;
+}
 
-  for (const validator of validators) {
+const BEACONCHA_API = "https://beaconcha.in/api/v1";
+
+/**
+ * Fetch validator attestations from beaconcha
+ */
+export async function fetchValidatorAttestations(index, startEpoch, endEpoch) {
+  try {
+    const url = `${BEACONCHA_API}/validator/${index}/attestations`;
+
+    const response = await axios.get(url);
+
+    const attestations = response.data?.data || [];
+
+    logInfo(
+      `Fetched ${attestations.length} total attestations for validator ${index}`,
+    );
+
+    // Filter for requested epoch range
+    const filtered = attestations.filter(
+      (a) => a.epoch >= startEpoch && a.epoch <= endEpoch,
+    );
+
+    logInfo(
+      `Filtered to ${filtered.length} attestations in epoch range ${startEpoch}-${endEpoch}`,
+    );
+
+    return filtered;
+  } catch (error) {
+    logError(
+      `Failed to fetch attestations for validator ${index}: ${error.message}`,
+    );
+
+    return [];
+  }
+}
+
+/**
+ * Analyze validator participation
+ */
+export async function analyzeAttestations(index, startEpoch, endEpoch) {
+  const attestations = await fetchValidatorAttestations(
+    index,
+    startEpoch,
+    endEpoch,
+  );
+
+  const results = [];
+
+  for (let epoch = startEpoch; epoch <= endEpoch; epoch++) {
+    const att = attestations.find((a) => a.epoch === epoch);
+
+    let source = true;
+    let target = true;
+    let head = true;
+    let classification = "correct";
+
+    if (!att) {
+      classification = "missed_attestation";
+      source = false;
+      target = false;
+      head = false;
+      logInfo(`Validator ${index} epoch ${epoch}: MISSED (no attestation)`);
+    } else {
+      source = att.source !== false;
+      target = att.target !== false;
+      head = att.head !== false;
+
+      if (!source || !target || !head) {
+        if (!source) classification = "wrong_source";
+        else if (!target) classification = "wrong_target";
+        else if (!head) classification = "wrong_head";
+      }
+    }
+
     results.push({
-      validator,
-      attested: participation[validator].attested,
-      source: participation[validator].source,
-      target: participation[validator].target,
-      head: participation[validator].head,
-      classification: participation[validator].classification,
-      balance: participation[validator].balance,
-      totalActiveBalance: participation[validator].totalActiveBalance,
+      epoch,
+      validator: index,
+      source,
+      target,
+      head,
+      classification,
     });
   }
+
+  logInfo(`Analyzed attestations for validator ${index}`);
 
   return results;
 }

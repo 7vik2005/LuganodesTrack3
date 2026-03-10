@@ -1,4 +1,5 @@
 import express from "express";
+
 import { getValidatorPerformance } from "../controllers/validatorController.js";
 
 const router = express.Router();

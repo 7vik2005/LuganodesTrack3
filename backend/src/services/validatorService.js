@@ -1,25 +1,32 @@
-import { epochToSlots } from "../utils/epochUtils.js";
-import { fetchBlock } from "./beaconService.js";
-import { analyzeAttestations } from "./attestationService.js";
-import { getBaseReward, computeMissedReward } from "./rewardCalculator.js";
-import { getEpochCache, saveEpochCache } from "../cache/epochCache.js";
+import { processEpochRange } from "./epochProcessor.js";
+import {
+  extractAttestations,
+  analyzeAttestations,
+} from "./attestationService.js";
+import { calculateValidatorMissedRewards } from "./rewardEngine.js";
+import { reconcileValidators } from "./reconciliationService.js";
+import { logInfo, logError } from "../utils/logger.js";
+import axios from "axios";
+import dotenv from "dotenv";
 
-const FLAG_WEIGHTS = {
-  SOURCE: 14,
-  TARGET: 26,
-  HEAD: 14,
-};
+dotenv.config();
+const BEACON_RPC = process.env.BEACON_RPC;
+const BEACONCHA_API = "https://beaconcha.in/api/v1";
 
 export async function computeValidatorPerformance(
   validatorIndices,
   startEpoch,
   endEpoch,
 ) {
+  logInfo(
+    `Computing validator performance from epoch ${startEpoch} to ${endEpoch}`,
+  );
+
   const validatorStats = {};
   const epochResults = [];
   const missingEpochs = [];
 
-  // initialize stats for validators
+  // Initialize stats for all validators
   for (const v of validatorIndices) {
     validatorStats[v] = {
       index: v,
@@ -33,109 +40,99 @@ export async function computeValidatorPerformance(
     };
   }
 
-  // iterate epochs
-  for (let epoch = startEpoch; epoch <= endEpoch; epoch++) {
-    try {
-      let epochData = getEpochCache(epoch);
+  try {
+    // Fetch all epoch data to understand the timeframe
+    const { epochResults: epochData, missingEpochs: missing } =
+      await processEpochRange(startEpoch, endEpoch);
+    missingEpochs.push(...missing);
 
-      if (!epochData) {
-        const { start, end } = epochToSlots(epoch);
+    // Process each validator independently
+    for (const validatorIndex of validatorIndices) {
+      const stats = validatorStats[validatorIndex];
 
-        const slotData = [];
+      logInfo(`Processing validator ${validatorIndex}`);
 
-        for (let slot = start; slot <= end; slot++) {
-          try {
-            const block = await fetchBlock(slot);
-
-            slotData.push(block);
-          } catch (err) {
-            console.error(`Slot fetch failed ${slot}`);
-          }
-        }
-
-        epochData = slotData;
-
-        saveEpochCache(epoch, epochData);
-      }
-
-      const attestationResults = analyzeAttestations(
-        epoch,
-        epochData,
-        validatorIndices,
+      // Use analyzeAttestations to get per-epoch participation data
+      const epochAnalysis = await analyzeAttestations(
+        validatorIndex,
+        startEpoch,
+        endEpoch,
       );
 
-      for (const result of attestationResults) {
-        const validator = validatorStats[result.validator];
+      if (!epochAnalysis || epochAnalysis.length === 0) {
+        logInfo(
+          `No attestation data found for validator ${validatorIndex} in epoch range ${startEpoch}-${endEpoch}`,
+        );
+        continue;
+      }
 
-        validator.totalAttestations++;
+      // Process each epoch from the analysis
+      for (const epochData of epochAnalysis) {
+        stats.totalAttestations++;
 
-        const baseReward = getBaseReward(
-          result.balance,
-          result.totalActiveBalance,
+        const sourceCorrect = epochData.source;
+        const targetCorrect = epochData.target;
+        const headCorrect = epochData.head;
+        const participated = epochData.classification !== "missed_attestation";
+
+        if (!participated) {
+          stats.missedAttestations++;
+        }
+
+        const participation = {
+          attested: participated,
+          timelySource: sourceCorrect,
+          timelyTarget: targetCorrect,
+          timelyHead: headCorrect,
+        };
+
+        const rewards = calculateValidatorMissedRewards(
+          participation,
+          32000000000,
+          1000000000000000,
         );
 
-        let missed = 0;
-
-        if (!result.source) {
-          const miss = computeMissedReward(baseReward, FLAG_WEIGHTS.SOURCE);
-
-          validator.missedSource += miss;
-          missed += miss;
-        }
-
-        if (!result.target) {
-          const miss = computeMissedReward(baseReward, FLAG_WEIGHTS.TARGET);
-
-          validator.missedTarget += miss;
-          missed += miss;
-        }
-
-        if (!result.head) {
-          const miss = computeMissedReward(baseReward, FLAG_WEIGHTS.HEAD);
-
-          validator.missedHead += miss;
-          missed += miss;
-        }
-
-        if (!result.attested) {
-          validator.missedAttestations++;
-        }
-
-        validator.totalMissedEth += missed;
+        stats.missedSource += rewards.missedSource;
+        stats.missedTarget += rewards.missedTarget;
+        stats.missedHead += rewards.missedHead;
+        stats.totalMissedEth += rewards.totalMissed;
 
         epochResults.push({
-          epoch,
-          validator: result.validator,
-          source: result.source,
-          target: result.target,
-          head: result.head,
-          classification: result.classification,
-          ethMissed: missed,
+          epoch: epochData.epoch,
+          validator: validatorIndex,
+          source: sourceCorrect,
+          target: targetCorrect,
+          head: headCorrect,
+          classification: epochData.classification,
+          ethMissed: rewards.totalMissed,
         });
       }
-    } catch (error) {
-      console.error(`Epoch failed ${epoch}`);
-
-      missingEpochs.push(epoch);
     }
+  } catch (error) {
+    logError(`Validator performance computation failed: ${error.message}`);
   }
 
-  // compute effectiveness
-
+  // Calculate effectiveness for each validator
   for (const v of validatorIndices) {
     const stats = validatorStats[v];
-
     const success = stats.totalAttestations - stats.missedAttestations;
-
     stats.effectiveness =
       stats.totalAttestations === 0
         ? 0
         : (success / stats.totalAttestations) * 100;
   }
 
+  // Reconcile with Beaconcha
+  const reconciliation = await reconcileValidators(
+    Object.values(validatorStats),
+  );
+
+  logInfo("Validator performance computation complete");
+
   return {
     validators: Object.values(validatorStats),
     epochs: epochResults,
+    reconciliation,
     missingEpochs,
   };
 }
