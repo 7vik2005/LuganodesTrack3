@@ -1,0 +1,36 @@
+{
+  "name": "ethereum-validator-dashboard-frontend",
+  "version": "1.0.0",
+  "description": "Modern web dashboard for monitoring Ethereum validator performance",
+  "main": "index.html",
+  "type": "module",
+  "scripts": {
+    "start": "http-server . -p 8000 -c-1",
+    "dev": "http-server . -p 8000 -c-1 --cors",
+    "serve": "python -m http.server 8000",
+    "build": "echo 'Frontend is static HTML/CSS/JS - no build needed'",
+    "lint": "echo 'No linter configured'",
+    "test": "echo 'No tests configured'"
+  },
+  "keywords": [
+    "ethereum",
+    "validator",
+    "performance",
+    "dashboard",
+    "beacon",
+    "blockchain"
+  ],
+  "author": "Luganodes",
+  "license": "ISC",
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/ethereum-validator-dashboard"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/ethereum-validator-dashboard/issues"
+  },
+  "homepage": "https://github.com/yourusername/ethereum-validator-dashboard#readme"
+}
