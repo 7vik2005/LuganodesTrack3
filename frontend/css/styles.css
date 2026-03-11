@@ -849,6 +849,47 @@ body {
 }
 
 /* ============================================
+   Failure Type Tags
+   ============================================ */
+
+.failure-types {
+  display: flex;
+  gap: var(--spacing-xs);
+  flex-wrap: wrap;
+  font-size: 0.8rem !important;
+}
+
+.failure-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.failure-tag.source {
+  background-color: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+}
+
+.failure-tag.target {
+  background-color: rgba(168, 85, 247, 0.2);
+  color: #c084fc;
+}
+
+.failure-tag.head {
+  background-color: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+}
+
+.recon-note {
+  margin-top: var(--spacing-sm);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* ============================================
    Print Styles
    ============================================ */
 

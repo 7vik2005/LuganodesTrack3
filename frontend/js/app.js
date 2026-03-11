@@ -8,31 +8,24 @@ class App {
     this.currentValidators = CONFIG.VALIDATORS.map((v) => v.pubkey);
     this.currentRange = CONFIG.DEFAULT_DAYS;
     this.isLoading = false;
+    this.pubkeyMap = {}; // index -> pubkey mapping from backend
 
     this.init();
   }
 
-  /**
-   * Initialize the application
-   */
   init() {
     this.setupEventListeners();
     this.setInitialDates();
     this.loadData();
   }
 
-  /**
-   * Setup all event listeners
-   */
   setupEventListeners() {
-    // Date range selector
     document
       .getElementById("date-range-select")
       .addEventListener("change", (e) => {
         this.handleDateRangeChange(e.target.value);
       });
 
-    // Custom date inputs
     document.getElementById("start-date").addEventListener("change", () => {
       this.handleCustomDateChange();
     });
@@ -40,20 +33,17 @@ class App {
       this.handleCustomDateChange();
     });
 
-    // Refresh button
     document.getElementById("refresh-btn").addEventListener("click", () => {
       this.loadData();
     });
 
-    // Retry button
     document.getElementById("retry-btn").addEventListener("click", () => {
       this.loadData();
     });
 
-    // Table filter and sort
     document.getElementById("filter-input").addEventListener(
       "input",
-      Utils.debounce((e) => this.filterAndSortTable()),
+      Utils.debounce(() => this.filterAndSortTable()),
     );
 
     document.getElementById("sort-select").addEventListener("change", () => {
@@ -61,20 +51,16 @@ class App {
     });
   }
 
-  /**
-   * Set initial date inputs
-   */
   setInitialDates() {
     const today = new Date();
-    const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const startDate = new Date(
+      today.getTime() - CONFIG.DEFAULT_DAYS * 24 * 60 * 60 * 1000,
+    );
 
     document.getElementById("end-date").valueAsDate = today;
-    document.getElementById("start-date").valueAsDate = sevenDaysAgo;
+    document.getElementById("start-date").valueAsDate = startDate;
   }
 
-  /**
-   * Handle date range preset selection
-   */
   handleDateRangeChange(value) {
     const customInputs = document.getElementById("custom-date-inputs");
 
@@ -85,7 +71,6 @@ class App {
       customInputs.style.display = "none";
       this.currentRange = parseInt(value);
 
-      // Update date inputs
       const today = new Date();
       const startDate = new Date(
         today.getTime() - this.currentRange * 24 * 60 * 60 * 1000,
@@ -98,9 +83,6 @@ class App {
     }
   }
 
-  /**
-   * Handle custom date range change
-   */
   handleCustomDateChange() {
     const startDate = document.getElementById("start-date").valueAsDate;
     const endDate = document.getElementById("end-date").valueAsDate;
@@ -110,24 +92,26 @@ class App {
     }
   }
 
-  /**
-   * Get current epoch range
-   */
   getEpochRange() {
-    const startDate = new Date(
-      document.getElementById("start-date").valueAsDate,
-    );
-    const endDate = new Date(document.getElementById("end-date").valueAsDate);
+    const startDate = document.getElementById("start-date").valueAsDate;
+    const endDate = document.getElementById("end-date").valueAsDate;
 
-    const startEpoch = APIClient.dateToEpoch(startDate);
-    const endEpoch = APIClient.dateToEpoch(endDate);
+    if (!startDate || !endDate) {
+      // Fallback to default range
+      const currentEpoch = APIClient.getCurrentEpoch();
+      const epochsBack = APIClient.daysToEpochs(CONFIG.DEFAULT_DAYS);
+      return {
+        startEpoch: currentEpoch - epochsBack,
+        endEpoch: currentEpoch,
+      };
+    }
 
-    return { startEpoch, endEpoch };
+    return {
+      startEpoch: APIClient.dateToEpoch(startDate),
+      endEpoch: APIClient.dateToEpoch(endDate),
+    };
   }
 
-  /**
-   * Load validator performance data
-   */
   async loadData() {
     if (this.isLoading) return;
 
@@ -143,12 +127,38 @@ class App {
         throw new Error(validation.errors[0]);
       }
 
-      // Fetch data from backend
+      const totalEpochs = endEpoch - startEpoch;
+      const loadStartTime = Date.now();
+      Renderer.updateLoadingProgress(
+        `Fetching data for ~${totalEpochs} epochs (epochs ${startEpoch} - ${endEpoch})... This may take several minutes.`,
+      );
+
+      // Fetch data from backend (with chunking for large ranges)
       const data = await apiClient.getValidatorPerformance(
         this.currentValidators,
         startEpoch,
         endEpoch,
+        (done, total) => {
+          const elapsed = Math.round((Date.now() - loadStartTime) / 1000);
+          const mins = Math.floor(elapsed / 60);
+          const secs = elapsed % 60;
+          const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+          if (total > 1) {
+            Renderer.updateLoadingProgress(
+              `Loading chunk ${done}/${total}... (${Math.round((done / total) * 100)}%) — elapsed: ${timeStr}`,
+            );
+          } else {
+            Renderer.updateLoadingProgress(
+              `Processing ~${totalEpochs} epochs... elapsed: ${timeStr}`,
+            );
+          }
+        },
       );
+
+      // Store pubkey mapping from backend
+      if (data.pubkeyMap) {
+        this.pubkeyMap = data.pubkeyMap;
+      }
 
       this.currentData = data;
       this.renderDashboard();
@@ -161,22 +171,18 @@ class App {
     }
   }
 
-  /**
-   * Render the complete dashboard
-   */
   renderDashboard() {
     if (!this.currentData) return;
 
     const { validators, epochs, reconciliation, missingEpochs } =
       this.currentData;
 
-    // Enrich validators with public keys for display
+    // Enrich validators with public keys from backend mapping
     const enrichedValidators = validators.map((v) => ({
       ...v,
       publicKey: this.getValidatorPublicKey(v.index),
     }));
 
-    // Render all components
     Renderer.renderValidatorCards(enrichedValidators);
     Renderer.renderEpochTable(epochs);
     Renderer.renderMissingEpochsAlert(missingEpochs);
@@ -188,27 +194,32 @@ class App {
   }
 
   /**
-   * Get public key for a validator index
+   * Get public key for a validator index using the backend-provided mapping
    */
   getValidatorPublicKey(index) {
-    // In a real scenario, you might need to fetch this from the backend
-    // For now, we use the config validators
-    const validator = CONFIG.VALIDATORS.find(
-      (v) => v.name === `Validator ${index}`,
-    );
-    return validator ? validator.pubkey : index;
+    // First check backend-provided pubkeyMap
+    if (this.pubkeyMap && this.pubkeyMap[index]) {
+      return this.pubkeyMap[index];
+    }
+    // Fallback: try to match from config by index position
+    for (const v of CONFIG.VALIDATORS) {
+      if (v.pubkey && this.pubkeyMap) {
+        // Check if this config pubkey maps to this index
+        for (const [idx, pk] of Object.entries(this.pubkeyMap)) {
+          if (Number(idx) === index) return pk;
+        }
+      }
+    }
+    return `Validator ${index}`;
   }
 
-  /**
-   * Filter and sort the epoch table
-   */
   filterAndSortTable() {
     if (!this.currentData) return;
 
     const filterValue = document.getElementById("filter-input").value;
     const sortValue = document.getElementById("sort-select").value;
 
-    let epochs = this.currentData.epochs;
+    let epochs = [...this.currentData.epochs];
 
     // Filter by validator index
     if (filterValue) {

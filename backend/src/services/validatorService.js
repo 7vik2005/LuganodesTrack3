@@ -1,32 +1,24 @@
-import { processEpochRange } from "./epochProcessor.js";
-import {
-  extractAttestations,
-  analyzeAttestations,
-} from "./attestationService.js";
-import { calculateValidatorMissedRewards } from "./rewardEngine.js";
-import { reconcileValidators } from "./reconciliationService.js";
+import { analyzeValidatorAttestations } from "./attestationService.js";
 import { logInfo, logError } from "../utils/logger.js";
-import axios from "axios";
-import dotenv from "dotenv";
 
-dotenv.config();
-const BEACON_RPC = process.env.BEACON_RPC;
-const BEACONCHA_API = "https://beaconcha.in/api/v1";
-
+/**
+ * Main orchestrator: compute attestation performance for all validators
+ * across the given epoch range using the Beacon RPC attestation rewards endpoint.
+ */
 export async function computeValidatorPerformance(
   validatorIndices,
   startEpoch,
-  endEpoch,
+  endEpoch
 ) {
-  logInfo(
-    `Computing validator performance from epoch ${startEpoch} to ${endEpoch}`,
-  );
+  logInfo(`Computing performance for validators [${validatorIndices}] from epoch ${startEpoch} to ${endEpoch}`);
 
+  // Analyze attestations using the Beacon RPC attestation rewards endpoint
+  const epochResults = await analyzeValidatorAttestations(validatorIndices, startEpoch, endEpoch);
+
+  // Aggregate per-validator stats from epoch results
   const validatorStats = {};
-  const epochResults = [];
   const missingEpochs = [];
 
-  // Initialize stats for all validators
   for (const v of validatorIndices) {
     validatorStats[v] = {
       index: v,
@@ -37,101 +29,88 @@ export async function computeValidatorPerformance(
       missedHead: 0,
       missedAttestations: 0,
       totalAttestations: 0,
+      wrongSourceCount: 0,
+      wrongTargetCount: 0,
+      wrongHeadCount: 0,
+      correctCount: 0,
     };
   }
 
-  try {
-    // Fetch all epoch data to understand the timeframe
-    const { epochResults: epochData, missingEpochs: missing } =
-      await processEpochRange(startEpoch, endEpoch);
-    missingEpochs.push(...missing);
+  for (const result of epochResults) {
+    const stats = validatorStats[result.validator];
+    if (!stats) continue;
 
-    // Process each validator independently
-    for (const validatorIndex of validatorIndices) {
-      const stats = validatorStats[validatorIndex];
-
-      logInfo(`Processing validator ${validatorIndex}`);
-
-      // Use analyzeAttestations to get per-epoch participation data
-      const epochAnalysis = await analyzeAttestations(
-        validatorIndex,
-        startEpoch,
-        endEpoch,
-      );
-
-      if (!epochAnalysis || epochAnalysis.length === 0) {
-        logInfo(
-          `No attestation data found for validator ${validatorIndex} in epoch range ${startEpoch}-${endEpoch}`,
-        );
-        continue;
+    // Track missing epochs
+    if (result.classification === "missing_data") {
+      if (!missingEpochs.includes(result.epoch)) {
+        missingEpochs.push(result.epoch);
       }
-
-      // Process each epoch from the analysis
-      for (const epochData of epochAnalysis) {
-        stats.totalAttestations++;
-
-        const sourceCorrect = epochData.source;
-        const targetCorrect = epochData.target;
-        const headCorrect = epochData.head;
-        const participated = epochData.classification !== "missed_attestation";
-
-        if (!participated) {
-          stats.missedAttestations++;
-        }
-
-        const participation = {
-          attested: participated,
-          timelySource: sourceCorrect,
-          timelyTarget: targetCorrect,
-          timelyHead: headCorrect,
-        };
-
-        const rewards = calculateValidatorMissedRewards(
-          participation,
-          32000000000,
-          1000000000000000,
-        );
-
-        stats.missedSource += rewards.missedSource;
-        stats.missedTarget += rewards.missedTarget;
-        stats.missedHead += rewards.missedHead;
-        stats.totalMissedEth += rewards.totalMissed;
-
-        epochResults.push({
-          epoch: epochData.epoch,
-          validator: validatorIndex,
-          source: sourceCorrect,
-          target: targetCorrect,
-          head: headCorrect,
-          classification: epochData.classification,
-          ethMissed: rewards.totalMissed,
-        });
-      }
+      continue;
     }
-  } catch (error) {
-    logError(`Validator performance computation failed: ${error.message}`);
+
+    // Skip epochs where validator wasn't scheduled
+    if (result.classification === "not_scheduled") continue;
+
+    stats.totalAttestations++;
+
+    switch (result.classification) {
+      case "correct":
+        stats.correctCount++;
+        break;
+      case "missed_attestation":
+        stats.missedAttestations++;
+        break;
+      case "wrong_head":
+        stats.wrongHeadCount++;
+        break;
+      case "wrong_target":
+        stats.wrongTargetCount++;
+        break;
+      case "wrong_source":
+        stats.wrongSourceCount++;
+        break;
+    }
+
+    // Accumulate missed ETH from per-epoch data
+    stats.missedSource += result.missedSourceEth || 0;
+    stats.missedTarget += result.missedTargetEth || 0;
+    stats.missedHead += result.missedHeadEth || 0;
+    stats.totalMissedEth += result.ethMissed || 0;
   }
 
-  // Calculate effectiveness for each validator
+  // Calculate effectiveness
   for (const v of validatorIndices) {
     const stats = validatorStats[v];
-    const success = stats.totalAttestations - stats.missedAttestations;
-    stats.effectiveness =
-      stats.totalAttestations === 0
-        ? 0
-        : (success / stats.totalAttestations) * 100;
+    if (stats.totalAttestations > 0) {
+      stats.effectiveness = (stats.correctCount / stats.totalAttestations) * 100;
+    }
   }
 
-  // Reconcile with Beaconcha
-  const reconciliation = await reconcileValidators(
-    Object.values(validatorStats),
+  // Include all epoch results (both correct and incorrect) — exclude only
+  // missing_data which is already surfaced via missingEpochs
+  const filteredEpochs = epochResults.filter(
+    (r) => r.classification !== "not_scheduled" && r.classification !== "missing_data"
   );
+
+  // Reconciliation data
+  const reconciliation = validatorIndices.map((idx) => {
+    const stats = validatorStats[idx];
+    return {
+      validator: idx,
+      toolMissedEth: stats.totalMissedEth,
+      toolMissedCount: stats.missedAttestations,
+      beaconchaMissedCount: null,
+      beaconchaMissedEth: null,
+      differencePercent: null,
+      note: "Using Beacon RPC attestation rewards directly — most accurate source",
+    };
+  });
 
   logInfo("Validator performance computation complete");
 
   return {
     validators: Object.values(validatorStats),
-    epochs: epochResults,
+    epochs: filteredEpochs,
     reconciliation,
     missingEpochs,
   };

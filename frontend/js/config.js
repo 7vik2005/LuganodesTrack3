@@ -9,10 +9,11 @@ const CONFIG = {
     ENDPOINTS: {
       PERFORMANCE: "/validators/performance",
     },
-    TIMEOUT: 30000, // 30 seconds
+    TIMEOUT: 3600000, // 1 hour — keep loading until all data is rendered
+    CHUNK_SIZE: 20250, // Max epochs per chunk request (fits within backend's 20250 limit, ~90 days)
   },
 
-  // Validators to track
+  // Validators to track (5 required validators)
   VALIDATORS: [
     {
       pubkey:
@@ -43,19 +44,20 @@ const CONFIG = {
 
   // Time range presets (in days)
   TIME_RANGES: {
+    1: "1 Day",
+    3: "3 Days",
     7: "7 Days",
     14: "14 Days",
     30: "30 Days",
-    90: "90 Days",
   },
 
   MAX_DAYS: 90,
-  DEFAULT_DAYS: 6,
+  DEFAULT_DAYS: 7, // 7-day default per spec
 
   // Ethereum constants
   ETHEREUM: {
-    EPOCHS_PER_DAY: 225, // 32 slots per epoch, 12 seconds per slot = 384 seconds per epoch
-    SLOT_TIME: 12, // seconds
+    EPOCHS_PER_DAY: 225,
+    SLOT_TIME: 12,
     SLOTS_PER_EPOCH: 32,
   },
 
@@ -77,8 +79,8 @@ const CONFIG = {
 
   // Participation constants
   PARTICIPATION: {
-    SOURCE_DISTANCE: 5, // slots
-    TARGET_DISTANCE: 32, // slots
-    HEAD_DISTANCE: 1, // slots
+    SOURCE_DISTANCE: 5,
+    TARGET_DISTANCE: 32,
+    HEAD_DISTANCE: 1,
   },
 };

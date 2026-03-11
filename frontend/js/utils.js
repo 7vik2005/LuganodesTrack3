@@ -5,42 +5,34 @@
 class Utils {
   /**
    * Format a number as ETH with proper decimal places
-   * @param {number} value - Value in ETH
-   * @param {number} decimals - Number of decimal places
-   * @returns {string} Formatted ETH value
    */
   static formatETH(value, decimals = 4) {
-    if (!value && value !== 0) return "N/A";
+    if (value === null || value === undefined) return "N/A";
+    if (typeof value !== "number" || isNaN(value)) return "0.0000";
     return value.toFixed(decimals);
   }
 
   /**
    * Format a percentage
-   * @param {number} value - Percentage value (0-100)
-   * @param {number} decimals - Number of decimal places
-   * @returns {string} Formatted percentage
    */
   static formatPercentage(value, decimals = 2) {
-    if (!value && value !== 0) return "N/A";
+    if (value === null || value === undefined) return "N/A";
+    if (typeof value !== "number" || isNaN(value)) return "0.00%";
     return `${value.toFixed(decimals)}%`;
   }
 
   /**
    * Truncate a long string
-   * @param {string} str - String to truncate
-   * @param {number} startChars - Number of characters from start
-   * @param {number} endChars - Number of characters from end
-   * @returns {string} Truncated string
    */
   static truncateString(str, startChars = 8, endChars = 6) {
-    if (!str || str.length <= startChars + endChars) return str;
+    if (!str) return "";
+    str = String(str);
+    if (str.length <= startChars + endChars + 3) return str;
     return `${str.substring(0, startChars)}...${str.substring(str.length - endChars)}`;
   }
 
   /**
    * Format a date for display
-   * @param {Date} date - Date object
-   * @returns {string} Formatted date
    */
   static formatDate(date) {
     if (!date) return "N/A";
@@ -55,8 +47,6 @@ class Utils {
 
   /**
    * Format epoch with date
-   * @param {number} epoch - Epoch number
-   * @returns {string} Formatted epoch and date
    */
   static formatEpochDate(epoch) {
     const date = APIClient.epochToDate(epoch);
@@ -64,9 +54,7 @@ class Utils {
   }
 
   /**
-   * Get color based on effectiveness percentage
-   * @param {number} effectiveness - Effectiveness percentage (0-100)
-   * @returns {string} CSS class name
+   * Get effectiveness CSS class
    */
   static getEffectivenessClass(effectiveness) {
     if (effectiveness >= 99) return "";
@@ -75,9 +63,7 @@ class Utils {
   }
 
   /**
-   * Get status badge data from classification
-   * @param {string} classification - Classification string
-   * @returns {Object} Badge object with text and class
+   * Get status badge from classification
    */
   static getStatusBadge(classification) {
     const badges = {
@@ -91,9 +77,7 @@ class Utils {
   }
 
   /**
-   * Check if a flag was correct
-   * @param {boolean} flag - Flag value
-   * @returns {Object} Badge object
+   * Get flag badge for source/target/head
    */
   static getFlagBadge(flag) {
     return flag
@@ -103,9 +87,6 @@ class Utils {
 
   /**
    * Group array by a key
-   * @param {Array} array - Array to group
-   * @param {string|Function} key - Key or function to group by
-   * @returns {Object} Grouped object
    */
   static groupBy(array, key) {
     const keyFunc = typeof key === "function" ? key : (item) => item[key];
@@ -119,28 +100,19 @@ class Utils {
 
   /**
    * Sort array by a key
-   * @param {Array} array - Array to sort
-   * @param {string} key - Key to sort by
-   * @param {string} order - 'asc' or 'desc'
-   * @returns {Array} Sorted array
    */
   static sortBy(array, key, order = "asc") {
-    const sorted = [...array].sort((a, b) => {
+    return [...array].sort((a, b) => {
       const aVal = a[key];
       const bVal = b[key];
-
       if (aVal < bVal) return order === "asc" ? -1 : 1;
       if (aVal > bVal) return order === "asc" ? 1 : -1;
       return 0;
     });
-    return sorted;
   }
 
   /**
    * Filter array by multiple criteria
-   * @param {Array} array - Array to filter
-   * @param {Object} criteria - Filter criteria
-   * @returns {Array} Filtered array
    */
   static filterBy(array, criteria) {
     return array.filter((item) => {
@@ -155,27 +127,7 @@ class Utils {
   }
 
   /**
-   * Calculate duration between two dates in readable format
-   * @param {Date} startDate - Start date
-   * @param {Date} endDate - End date
-   * @returns {string} Duration string
-   */
-  static formatDuration(startDate, endDate) {
-    const msPerDay = 24 * 60 * 60 * 1000;
-    const days = Math.round((endDate - startDate) / msPerDay);
-
-    if (days === 0) return "Today";
-    if (days === 1) return "Yesterday";
-    if (days < 7) return `${days} days ago`;
-    if (days < 30) return `${Math.floor(days / 7)} weeks ago`;
-    return `${Math.floor(days / 30)} months ago`;
-  }
-
-  /**
    * Debounce function
-   * @param {Function} func - Function to debounce
-   * @param {number} delay - Delay in milliseconds
-   * @returns {Function} Debounced function
    */
   static debounce(func, delay = 300) {
     let timeoutId;
@@ -186,42 +138,27 @@ class Utils {
   }
 
   /**
-   * Calculate percentile color for heatmap
-   * @param {number} value - Value
-   * @param {number} min - Minimum value
-   * @param {number} max - Maximum value
-   * @returns {string} Color hex code
-   */
-  static getPercentileColor(value, min, max) {
-    const range = max - min;
-    const percentage = (value - min) / range;
-
-    // Green to Red gradient
-    const hue = (1 - percentage) * 120; // 120 = green, 0 = red
-    return `hsl(${hue}, 100%, 50%)`;
-  }
-
-  /**
    * Validate epoch range
-   * @param {number} startEpoch - Start epoch
-   * @param {number} endEpoch - End epoch
-   * @param {number} maxRange - Maximum epoch range
-   * @returns {Object} Validation result
    */
-  static validateEpochRange(startEpoch, endEpoch, maxRange = 200) {
+  static validateEpochRange(startEpoch, endEpoch) {
     const errors = [];
+
+    if (isNaN(startEpoch) || isNaN(endEpoch)) {
+      errors.push("Invalid epoch values");
+    }
 
     if (startEpoch >= endEpoch) {
       errors.push("Start epoch must be before end epoch");
     }
 
+    const maxRange = CONFIG.MAX_DAYS * CONFIG.ETHEREUM.EPOCHS_PER_DAY; // ~20,250 for 90 days
     if (endEpoch - startEpoch > maxRange) {
-      errors.push(`Epoch range cannot exceed ${maxRange} epochs`);
+      errors.push(`Date range cannot exceed ${CONFIG.MAX_DAYS} days`);
     }
 
     const currentEpoch = APIClient.getCurrentEpoch();
-    if (endEpoch > currentEpoch) {
-      errors.push("End epoch cannot be in the future");
+    if (endEpoch > currentEpoch + 1) {
+      errors.push("End date cannot be in the future");
     }
 
     return {
@@ -231,32 +168,17 @@ class Utils {
   }
 
   /**
-   * Statistics calculations
+   * Simple statistics
    */
-  static stats = {
-    /**
-     * Calculate average
-     */
-    average: (values) => {
-      if (!values.length) return 0;
-      return values.reduce((a, b) => a + b, 0) / values.length;
-    },
+  static average(values) {
+    if (!values || !values.length) return 0;
+    return values.reduce((a, b) => a + b, 0) / values.length;
+  }
 
-    /**
-     * Calculate standard deviation
-     */
-    stdDev: (values) => {
-      const avg = this.stats.average(values);
-      const squareDiffs = values.map((v) => Math.pow(v - avg, 2));
-      return Math.sqrt(this.stats.average(squareDiffs));
-    },
-
-    /**
-     * Get min and max
-     */
-    minMax: (values) => ({
+  static minMax(values) {
+    return {
       min: Math.min(...values),
       max: Math.max(...values),
-    }),
-  };
+    };
+  }
 }

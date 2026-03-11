@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Ethereum Validator Performance Dashboard</title>
+    <meta
+      name="description"
+      content="Real-time Ethereum validator attestation performance dashboard with detailed epoch-by-epoch analysis and reward breakdown."
+    />
     <link rel="stylesheet" href="css/styles.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
   </head>
@@ -30,10 +34,11 @@
             <div class="date-controls">
               <label for="date-range-select">Time Range:</label>
               <select id="date-range-select" class="select-control">
-                <option value="7">Last 7 Days</option>
+                <option value="1">Last 1 Day</option>
+                <option value="3">Last 3 Days</option>
+                <option value="7" selected>Last 7 Days</option>
                 <option value="14">Last 14 Days</option>
                 <option value="30">Last 30 Days</option>
-                <option value="90">Last 90 Days</option>
                 <option value="custom">Custom Range</option>
               </select>
             </div>
@@ -60,6 +65,15 @@
         <div id="loading-state" class="loading-state" style="display: none">
           <div class="spinner"></div>
           <p>Loading validator performance data...</p>
+          <p
+            id="loading-progress"
+            class="loading-progress-text"
+            style="
+              font-size: 0.85rem;
+              color: var(--text-muted);
+              margin-top: 0.5rem;
+            "
+          ></p>
         </div>
 
         <!-- Error State -->
@@ -166,11 +180,11 @@
       </footer>
     </div>
 
-    <script src="js/config.js"></script>
-    <script src="js/api.js"></script>
-    <script src="js/utils.js"></script>
-    <script src="js/renderer.js"></script>
-    <script src="js/chart.js"></script>
-    <script src="js/app.js"></script>
+    <script src="js/config.js?v=2"></script>
+    <script src="js/api.js?v=2"></script>
+    <script src="js/utils.js?v=2"></script>
+    <script src="js/renderer.js?v=2"></script>
+    <script src="js/chart.js?v=2"></script>
+    <script src="js/app.js?v=2"></script>
   </body>
 </html>

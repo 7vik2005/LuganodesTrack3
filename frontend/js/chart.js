@@ -9,55 +9,81 @@ class ChartManager {
 
   /**
    * Create and render the performance trend chart
-   * @param {Array} epochs - Epoch data
-   * @param {Array} validators - Validator indices
    */
   createTrendChart(epochs, validators) {
-    // Destroy existing chart if it exists
     if (this.chart) {
       this.chart.destroy();
+    }
+
+    if (!epochs || epochs.length === 0 || !validators || validators.length === 0) {
+      return;
     }
 
     // Group epochs by validator
     const validatorEpochs = {};
     validators.forEach((validator) => {
-      validatorEpochs[validator] = epochs.filter(
-        (e) => e.validator === validator,
-      );
+      validatorEpochs[validator] = epochs
+        .filter((e) => e.validator === validator)
+        .sort((a, b) => a.epoch - b.epoch);
     });
 
-    // Calculate effectiveness per epoch for each validator
+    // Determine aggregation level based on data size
+    const firstValidatorData = validatorEpochs[validators[0]] || [];
+    const totalPoints = firstValidatorData.length;
+    const aggregateSize = totalPoints > 200 ? Math.ceil(totalPoints / 100) : 1;
+
+    // Build datasets
     const datasets = validators.map((validator, index) => {
-      const validatorData = validatorEpochs[validator];
-      const sortedData = Utils.sortBy(validatorData, "epoch", "asc");
+      const sortedData = validatorEpochs[validator] || [];
 
-      // Calculate effectiveness per epoch
-      const data = sortedData.map((epoch) => {
-        // Determine if attestation was correct
-        const isCorrect =
-          epoch.classification === "correct" ||
-          (epoch.source && epoch.target && epoch.head);
-        return isCorrect ? 100 : 0;
-      });
+      // Aggregate data points if too many
+      let chartData;
+      let chartLabels;
 
-      // Calculate moving average (7 epoch window)
-      const movingAverageData = data.map((_, i) => {
-        const window = data.slice(Math.max(0, i - 3), i + 4);
-        return (window.reduce((a, b) => a + b, 0) / window.length) * 100;
-      });
+      if (aggregateSize > 1) {
+        chartData = [];
+        chartLabels = [];
+        for (let i = 0; i < sortedData.length; i += aggregateSize) {
+          const chunk = sortedData.slice(i, i + aggregateSize);
+          const correctCount = chunk.filter(
+            (e) => e.classification === "correct"
+          ).length;
+          const effectiveness = (correctCount / chunk.length) * 100;
+          chartData.push(effectiveness);
+          chartLabels.push(chunk[Math.floor(chunk.length / 2)].epoch);
+        }
+      } else {
+        chartData = sortedData.map((e) => {
+          return e.classification === "correct" ? 100 : 0;
+        });
+        chartLabels = sortedData.map((e) => e.epoch);
+
+        // Calculate 7-epoch moving average for smoother chart
+        chartData = chartData.map((_, i) => {
+          const windowStart = Math.max(0, i - 3);
+          const windowEnd = Math.min(chartData.length, i + 4);
+          const window = chartData.slice(windowStart, windowEnd);
+          return window.reduce((a, b) => a + b, 0) / window.length;
+        });
+      }
+
+      // Store labels from first validator (for x-axis)
+      if (index === 0) {
+        this._labels = chartLabels;
+      }
 
       return {
-        label: `Validator ${Utils.truncateString(validator, 6, 4)}`,
-        data: movingAverageData,
+        label: `Validator ${Utils.truncateString(String(validator), 6, 4)}`,
+        data: chartData,
         borderColor: CONFIG.CHART_COLORS[index % CONFIG.CHART_COLORS.length],
         backgroundColor: this.hexToRgba(
           CONFIG.CHART_COLORS[index % CONFIG.CHART_COLORS.length],
-          0.05,
+          0.05
         ),
         borderWidth: 2,
         tension: 0.4,
         fill: false,
-        pointRadius: 3,
+        pointRadius: totalPoints > 50 ? 0 : 3,
         pointHoverRadius: 5,
         pointBackgroundColor:
           CONFIG.CHART_COLORS[index % CONFIG.CHART_COLORS.length],
@@ -66,21 +92,11 @@ class ChartManager {
       };
     });
 
-    // Get epoch labels
-    const allEpochs = epochs.map((e) => e.epoch);
-    const firstValidatorEpochs = validatorEpochs[validators[0]];
-    const sortedFirstValidator = Utils.sortBy(
-      firstValidatorEpochs,
-      "epoch",
-      "asc",
-    );
-    const labels = sortedFirstValidator.map((e) => e.epoch);
-
     const ctx = document.getElementById("performanceChart");
     this.chart = new Chart(ctx, {
       type: "line",
       data: {
-        labels: labels,
+        labels: this._labels || [],
         datasets: datasets,
       },
       options: {
@@ -95,11 +111,8 @@ class ChartManager {
             display: true,
             position: "top",
             labels: {
-              color: "var(--text-primary)",
-              font: {
-                size: 12,
-                weight: "600",
-              },
+              color: "#cbd5e1",
+              font: { size: 12, weight: "600" },
               padding: 15,
               usePointStyle: true,
               pointStyle: "circle",
@@ -107,22 +120,17 @@ class ChartManager {
           },
           tooltip: {
             backgroundColor: "rgba(30, 41, 59, 0.9)",
-            titleColor: "var(--text-primary)",
-            bodyColor: "var(--text-secondary)",
-            borderColor: "var(--border-color)",
+            titleColor: "#f1f5f9",
+            bodyColor: "#cbd5e1",
+            borderColor: "#475569",
             borderWidth: 1,
             padding: 12,
-            titleFont: {
-              size: 12,
-              weight: "bold",
-            },
-            bodyFont: {
-              size: 11,
-            },
+            titleFont: { size: 12, weight: "bold" },
+            bodyFont: { size: 11 },
             displayColors: true,
             callbacks: {
               label: function (context) {
-                return `${context.dataset.label}: ${context.parsed.y.toFixed(2)}%`;
+                return `${context.dataset.label}: ${context.parsed.y.toFixed(1)}%`;
               },
             },
           },
@@ -136,10 +144,8 @@ class ChartManager {
               drawBorder: false,
             },
             ticks: {
-              color: "var(--text-muted)",
-              font: {
-                size: 11,
-              },
+              color: "#94a3b8",
+              font: { size: 11 },
               callback: function (value) {
                 return value + "%";
               },
@@ -147,11 +153,8 @@ class ChartManager {
             title: {
               display: true,
               text: "Effectiveness (%)",
-              color: "var(--text-secondary)",
-              font: {
-                size: 12,
-                weight: "bold",
-              },
+              color: "#cbd5e1",
+              font: { size: 12, weight: "bold" },
             },
           },
           x: {
@@ -160,11 +163,9 @@ class ChartManager {
               drawBorder: false,
             },
             ticks: {
-              color: "var(--text-muted)",
-              font: {
-                size: 10,
-              },
-              // Show every Nth label to avoid crowding
+              color: "#94a3b8",
+              font: { size: 10 },
+              maxTicksLimit: 15,
               callback: function (value, index, ticks) {
                 if (ticks.length > 20) {
                   return index % Math.ceil(ticks.length / 10) === 0
@@ -177,11 +178,8 @@ class ChartManager {
             title: {
               display: true,
               text: "Epoch",
-              color: "var(--text-secondary)",
-              font: {
-                size: 12,
-                weight: "bold",
-              },
+              color: "#cbd5e1",
+              font: { size: 12, weight: "bold" },
             },
           },
         },
@@ -189,12 +187,6 @@ class ChartManager {
     });
   }
 
-  /**
-   * Convert hex color to rgba
-   * @param {string} hex - Hex color code
-   * @param {number} alpha - Alpha value (0-1)
-   * @returns {string} RGBA color string
-   */
   hexToRgba(hex, alpha = 1) {
     const r = parseInt(hex.slice(1, 3), 16);
     const g = parseInt(hex.slice(3, 5), 16);
@@ -202,9 +194,6 @@ class ChartManager {
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
 
-  /**
-   * Clear the chart
-   */
   clear() {
     if (this.chart) {
       this.chart.destroy();
