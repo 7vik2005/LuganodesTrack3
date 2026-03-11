@@ -5,7 +5,10 @@
 const CONFIG = {
   // API Configuration
   API: {
-    BASE_URL: "http://localhost:3000/api",
+    BASE_URL:
+      process.env.NODE_ENV === "production"
+        ? "https://ethereum-validator-dashboard-backend-production.up.railway.app/api"
+        : "http://localhost:3000/api",
     ENDPOINTS: {
       PERFORMANCE: "/validators/performance",
     },
