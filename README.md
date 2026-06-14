@@ -1,4 +1,7 @@
 # Ethereum Validator Performance Dashboard
+![Status](https://img.shields.io/badge/Status-In%20Development-orange)
+![Ethereum](https://img.shields.io/badge/Ethereum-Beacon%20Chain-blue)
+![Node.js](https://img.shields.io/badge/Backend-Node.js-green)
 
 A full-stack dashboard for monitoring Ethereum validator attestation performance, computing missed rewards using the **Altair consensus specification**, and reconciling results against beaconcha.in.
 
